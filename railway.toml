@@ -1,0 +1,13 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "cd cmd/api && go run main.go"
+
+[[services]]
+name = "hots-api"
+port = 8081
+
+[services.envs]
+PORT = "8081"
+GIN_MODE = "release"

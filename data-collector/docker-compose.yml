@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  data-collector:
+    build: .
+    container_name: hots-data-collector
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - API_BASE_URL=${API_BASE_URL}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - COLLECTION_SCHEDULE=${COLLECTION_SCHEDULE}
+      - PLATFORMS=${PLATFORMS}
+      - LOG_LEVEL=${LOG_LEVEL}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - hots-network
+    depends_on:
+      - hots-api
+
+  hots-api:
+    image: hots-api:latest
+    container_name: hots-api
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+    networks:
+      - hots-network
+
+networks:
+  hots-network:
+    driver: bridge

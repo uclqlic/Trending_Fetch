@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>热搜聚合API调用示例</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .platform-selector {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+        .platform-btn {
+            padding: 10px 20px;
+            background: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .platform-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .platform-btn.active {
+            background: #ffd700;
+            color: #333;
+        }
+        .hot-list {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        .error {
+            color: #e74c3c;
+            text-align: center;
+            padding: 20px;
+        }
+        .hot-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            align-items: center;
+            transition: background 0.3s;
+        }
+        .hot-item:hover {
+            background: #f8f9fa;
+        }
+        .hot-item:last-child {
+            border-bottom: none;
+        }
+        .hot-rank {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+        .hot-rank.top1 { background: #ffd700; color: #333; }
+        .hot-rank.top2 { background: #c0c0c0; color: #333; }
+        .hot-rank.top3 { background: #cd7f32; color: white; }
+        .hot-rank.normal { background: #f0f0f0; color: #666; }
+        .hot-content {
+            flex: 1;
+        }
+        .hot-title {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        .hot-desc {
+            font-size: 14px;
+            color: #666;
+        }
+        .hot-value {
+            color: #ff6b6b;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .refresh-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: white;
+            border: none;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            cursor: pointer;
+            font-size: 24px;
+            transition: all 0.3s;
+        }
+        .refresh-btn:hover {
+            transform: rotate(180deg);
+        }
+        .api-config {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .api-config input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .api-config label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔥 全网热搜聚合</h1>
+
+        <div class="api-config">
+            <label for="apiUrl">API服务地址（默认本地8081端口）</label>
+            <input type="text" id="apiUrl" value="http://localhost:8081" placeholder="例如: http://localhost:8081">
+        </div>
+
+        <div class="platform-selector" id="platformSelector">
+            <button class="platform-btn active" data-platform="weibo">微博</button>
+            <button class="platform-btn" data-platform="bili">B站</button>
+            <button class="platform-btn" data-platform="douyin">抖音</button>
+            <button class="platform-btn" data-platform="zhihu/v2">知乎</button>
+            <button class="platform-btn" data-platform="toutiao">头条</button>
+            <button class="platform-btn" data-platform="xhs">小红书</button>
+            <button class="platform-btn" data-platform="douban">豆瓣</button>
+            <button class="platform-btn" data-platform="baidu">百度</button>
+            <button class="platform-btn" data-platform="36kr">36氪</button>
+            <button class="platform-btn" data-platform="csdn">CSDN</button>
+            <button class="platform-btn" data-platform="juejin">掘金</button>
+            <button class="platform-btn" data-platform="ithome">IT之家</button>
+        </div>
+
+        <div class="hot-list" id="hotList">
+            <div class="loading">加载中...</div>
+        </div>
+
+        <button class="refresh-btn" onclick="fetchHotData()">🔄</button>
+    </div>
+
+    <script>
+        let currentPlatform = 'weibo';
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchHotData();
+
+            // 绑定平台切换事件
+            document.querySelectorAll('.platform-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelector('.platform-btn.active').classList.remove('active');
+                    this.classList.add('active');
+                    currentPlatform = this.dataset.platform;
+                    fetchHotData();
+                });
+            });
+
+            // API地址变更监听
+            document.getElementById('apiUrl').addEventListener('change', fetchHotData);
+        });
+
+        // 获取热搜数据
+        async function fetchHotData() {
+            const apiUrl = document.getElementById('apiUrl').value || 'http://localhost:8081';
+            const hotList = document.getElementById('hotList');
+            hotList.innerHTML = '<div class="loading">加载中...</div>';
+
+            try {
+                const response = await fetch(`${apiUrl}/api/hot/${currentPlatform}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    // 如果API服务器配置了CORS，这里不需要额外设置
+                    // 如果遇到跨域问题，需要在服务器端配置CORS
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if ((result.code === 200 || result.code === 0) && result.data) {
+                    renderHotList(result.data);
+                } else {
+                    hotList.innerHTML = '<div class="error">暂无数据</div>';
+                }
+            } catch (error) {
+                console.error('获取数据失败:', error);
+                hotList.innerHTML = `
+                    <div class="error">
+                        获取数据失败<br>
+                        <small>${error.message}</small><br>
+                        <small>请确保API服务正在运行，并检查地址是否正确</small>
+                    </div>
+                `;
+            }
+        }
+
+        // 渲染热搜列表
+        function renderHotList(data) {
+            const hotList = document.getElementById('hotList');
+
+            if (!data || data.length === 0) {
+                hotList.innerHTML = '<div class="error">暂无数据</div>';
+                return;
+            }
+
+            const html = data.map((item, index) => {
+                const rankClass = index === 0 ? 'top1' :
+                                 index === 1 ? 'top2' :
+                                 index === 2 ? 'top3' : 'normal';
+
+                return `
+                    <div class="hot-item">
+                        <div class="hot-rank ${rankClass}">${item.pos || index + 1}</div>
+                        <div class="hot-content">
+                            <div class="hot-title">
+                                ${item.title}
+                                ${item.hot_val ? `<span class="hot-value">${item.hot_val}</span>` : ''}
+                            </div>
+                            ${item.desc ? `<div class="hot-desc">${item.desc}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            hotList.innerHTML = html;
+        }
+
+        // 自动刷新（每2分钟）
+        setInterval(fetchHotData, 120000);
+    </script>
+</body>
+</html>
