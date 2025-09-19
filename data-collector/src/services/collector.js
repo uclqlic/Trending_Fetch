@@ -2,15 +2,19 @@ const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../config/logger');
 const { supabase } = require('../config/database');
+const BatchJobService = require('./batchJobService');
 
 class DataCollector {
   constructor() {
     this.apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:8081/api/hot';
-    this.platforms = (process.env.PLATFORMS || 'baidu,toutiao,douban,xhs,36kr,juejin,ithome,weibo').split(',');
+    this.platforms = (process.env.PLATFORMS || 'baidu,toutiao,douban,xhs,36kr,juejin,ithome,bili,douyin,weibo').split(',');
 
-    // 初始化Weibo RSS采集器
-    const WeiboRssCollector = require('./weiboRssCollector');
-    this.weiboCollector = new WeiboRssCollector();
+    // 初始化Weibo GitHub采集器
+    const WeiboGithubCollector = require('./weiboGithubCollector');
+    this.weiboCollector = new WeiboGithubCollector();
+
+    // 初始化批次任务服务
+    this.batchJobService = new BatchJobService();
   }
 
   /**
@@ -142,6 +146,11 @@ class DataCollector {
    * 收集单个平台的数据
    */
   async collectPlatform(platform) {
+    // 如果是Weibo，使用GitHub采集器
+    if (platform === 'weibo') {
+      return await this.collectWeiboFromGithub();
+    }
+
     const startTime = Date.now();
     let status = 'success';
     let itemsCollected = 0;
@@ -195,13 +204,13 @@ class DataCollector {
   }
 
   /**
-   * 从RSS采集Weibo数据
+   * 从GitHub采集Weibo数据
    */
-  async collectWeiboFromRss() {
+  async collectWeiboFromGithub() {
     try {
-      logger.info('Starting Weibo RSS collection');
+      logger.info('Starting Weibo GitHub collection');
 
-      // 使用Weibo RSS采集器
+      // 使用Weibo GitHub采集器
       const result = await this.weiboCollector.collect();
 
       // 如果有数据，触发翻译
@@ -226,7 +235,7 @@ class DataCollector {
 
       return result;
     } catch (error) {
-      logger.error('Weibo RSS collection failed:', error);
+      logger.error('Weibo GitHub collection failed:', error);
 
       const duration = 0;
       await this.logCollection('weibo', 'failed', 0, 0, error, duration);
@@ -265,36 +274,82 @@ class DataCollector {
   async collectAll() {
     logger.info('Starting data collection for all platforms');
     const results = [];
+    let batchJob = null;
 
-    for (const platform of this.platforms) {
-      try {
-        const result = await this.collectPlatform(platform);
-        results.push(result);
+    try {
+      // 创建批次任务记录
+      batchJob = await this.batchJobService.createBatchJob('data_collection', this.platforms);
+      await this.batchJobService.startBatchJob(batchJob.id);
 
-        // 添加延迟避免过快请求
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (error) {
-        logger.error(`Failed to collect ${platform}:`, error);
-        results.push({
-          platform,
-          status: 'failed',
-          error: error.message
+      for (const platform of this.platforms) {
+        try {
+          const result = await this.collectPlatform(platform);
+          results.push(result);
+
+          // 更新批次任务进度
+          await this.batchJobService.updatePlatformProgress(
+            batchJob.id,
+            platform,
+            result.itemsCollected || 0,
+            {
+              [`${platform}_status`]: result.status,
+              [`${platform}_translated`]: result.itemsTranslated || 0,
+              [`${platform}_duration`]: result.duration || 0
+            }
+          );
+
+          // 添加延迟避免过快请求
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (error) {
+          logger.error(`Failed to collect ${platform}:`, error);
+          results.push({
+            platform,
+            status: 'failed',
+            error: error.message
+          });
+
+          // 记录失败的平台
+          await this.batchJobService.updatePlatformProgress(
+            batchJob.id,
+            platform,
+            0,
+            {
+              [`${platform}_status`]: 'failed',
+              [`${platform}_error`]: error.message
+            }
+          );
+        }
+      }
+
+      const summary = {
+        total: results.length,
+        success: results.filter(r => r.status === 'success').length,
+        partial: results.filter(r => r.status === 'partial').length,
+        failed: results.filter(r => r.status === 'failed').length,
+        totalItems: results.reduce((sum, r) => sum + (r.itemsCollected || 0), 0),
+        totalTranslated: results.reduce((sum, r) => sum + (r.itemsTranslated || 0), 0),
+        results
+      };
+
+      // 完成批次任务
+      if (batchJob) {
+        await this.batchJobService.completeBatchJob(batchJob.id, summary);
+      }
+
+      logger.info('Collection completed:', summary);
+      return { ...summary, batchJobId: batchJob?.id };
+    } catch (error) {
+      logger.error('Collection failed:', error);
+
+      // 如果批次任务创建了但失败了，标记为失败
+      if (batchJob) {
+        await this.batchJobService.failBatchJob(batchJob.id, error, {
+          results_so_far: results
         });
       }
+
+      throw error;
     }
-
-    const summary = {
-      total: results.length,
-      success: results.filter(r => r.status === 'success').length,
-      partial: results.filter(r => r.status === 'partial').length,
-      failed: results.filter(r => r.status === 'failed').length,
-      totalItems: results.reduce((sum, r) => sum + (r.itemsCollected || 0), 0),
-      totalTranslated: results.reduce((sum, r) => sum + (r.itemsTranslated || 0), 0),
-      results
-    };
-
-    logger.info('Collection completed:', summary);
-    return summary;
   }
 }
 

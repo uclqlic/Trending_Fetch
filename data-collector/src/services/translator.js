@@ -1,11 +1,13 @@
 const OpenAI = require('openai');
 const logger = require('../config/logger');
 const { supabase } = require('../config/database');
+const BatchJobService = require('./batchJobService');
 
 class TranslationService {
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY;
     this.openai = this.apiKey ? new OpenAI({ apiKey: this.apiKey }) : null;
+    this.batchJobService = new BatchJobService();
     // 支持的目标语言及其对应的表名（根据实际存在的表）
     this.targetLanguages = {
       'en': 'translations_en',  // 英语
