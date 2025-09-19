@@ -142,11 +142,6 @@ class DataCollector {
    * 收集单个平台的数据
    */
   async collectPlatform(platform) {
-    // 如果是Weibo，使用RSS采集器
-    if (platform === 'weibo') {
-      return await this.collectWeiboFromRss();
-    }
-
     const startTime = Date.now();
     let status = 'success';
     let itemsCollected = 0;
