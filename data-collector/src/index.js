@@ -59,9 +59,9 @@ async function main() {
   // 获取调度配置
   const schedule = process.env.COLLECTION_SCHEDULE || '*/15 * * * *'; // 默认每15分钟
 
-  // 如果是开发环境，立即运行一次
-  if (process.env.NODE_ENV === 'development') {
-    logger.info('Development mode: Running initial collection');
+  // 启动时运行一次初始采集（可选）
+  if (process.env.RUN_ON_START === 'true' || process.env.NODE_ENV === 'development') {
+    logger.info('Running initial collection on startup');
     await manualCollection();
   }
 

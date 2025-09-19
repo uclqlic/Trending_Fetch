@@ -1,32 +1,30 @@
 #!/bin/bash
 
-echo "=== 测试各平台API状态 ==="
-echo ""
+# Test all platforms to see which ones are available from the Go API
+API_BASE="https://hots-api-production.up.railway.app/api/hot"
 
-platforms=("weibo" "bili" "douyin" "zhihu/v2" "baidu" "toutiao" "douban" "xhs" "36kr" "csdn" "juejin" "ithome")
+echo "Testing available platforms from Go API:"
+echo "========================================"
+
+# Test platforms that might be available
+platforms=("baidu" "toutiao" "douban" "xhs" "36kr" "juejin" "ithome" "zhihu" "zhihu/v2" "bili" "bilibili" "douyin" "weibo")
 
 for platform in "${platforms[@]}"; do
-    response=$(curl -s "http://localhost:8081/api/hot/$platform" 2>/dev/null)
+    echo -n "Testing $platform: "
+    response=$(curl -s "${API_BASE}/${platform}")
 
-    # 检查是否有数据
-    if echo "$response" | grep -q '"data":\[.*\]' && ! echo "$response" | grep -q '"data":\[\]'; then
-        echo "✅ $platform: 有数据"
-    elif echo "$response" | grep -q '"data":null'; then
-        echo "❌ $platform: 无数据 (null)"
-    elif echo "$response" | grep -q '"data":\[\]'; then
-        echo "⚠️  $platform: 空数组"
+    # Check if response contains code:0 (successful)
+    if echo "$response" | grep -q '"code":0'; then
+        echo "✅ Available"
+    elif echo "$response" | grep -q "404"; then
+        echo "❌ Not found (404)"
     else
-        echo "❓ $platform: 未知状态"
+        # Try to extract error message
+        if echo "$response" | grep -q '"code"'; then
+            code=$(echo "$response" | grep -o '"code":[^,}]*' | cut -d':' -f2)
+            echo "⚠️ Available but error (code: $code)"
+        else
+            echo "❌ Error or unavailable"
+        fi
     fi
-done
-
-echo ""
-echo "=== 详细错误信息 ==="
-echo ""
-
-# 显示有错误的平台详情
-for platform in "weibo" "zhihu/v2"; do
-    echo "--- $platform ---"
-    curl -s "http://localhost:8081/api/hot/$platform" | python3 -m json.tool | head -10
-    echo ""
 done

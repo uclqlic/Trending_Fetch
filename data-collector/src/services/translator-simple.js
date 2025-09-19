@@ -6,9 +6,16 @@ class TranslationService {
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY;
     this.openai = this.apiKey ? new OpenAI({ apiKey: this.apiKey }) : null;
-    // 只翻译到已存在的表
+    // 支持的目标语言及其对应的表名（根据实际存在的表）
     this.targetLanguages = {
-      'ar': 'translations_ar'  // 只翻译到阿拉伯语
+      'en': 'translations_en',  // 英语
+      'ja': 'translations_ja',  // 日语
+      'ko': 'translations_ko',  // 韩语
+      'es': 'translations_es',  // 西班牙语
+      'fr': 'translations_fr',  // 法语
+      'de': 'translations_de',  // 德语
+      'ru': 'translations_ru',  // 俄语
+      'ar': 'translations_ar'   // 阿拉伯语
     };
   }
 

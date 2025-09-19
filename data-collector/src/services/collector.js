@@ -26,11 +26,9 @@ class DataCollector {
    */
   async fetchPlatformData(platform) {
     try {
-      // 处理特殊的平台路由
+      // 大部分平台直接使用平台名作为API路径
+      // 特殊情况：zhihu需要使用v2版本（但目前API返回错误）
       let apiPath = platform;
-      if (platform === 'zhihu') {
-        apiPath = 'zhihu/v2'; // 使用v2版本
-      }
 
       const url = `${this.apiBaseUrl}/${apiPath}`;
       logger.info(`Fetching data from ${url}`);
@@ -63,6 +61,7 @@ class DataCollector {
       return { saved: 0, errors: 0 };
     }
 
+    // 直接使用平台名构建表名，因为表名已经改为trending_bili
     const tableName = `trending_${platform}`;
     const records = [];
 
