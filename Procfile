@@ -1,1 +1,0 @@
-web: cd /app && go run cmd/api/main.go
