@@ -7,7 +7,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # 安装生产依赖
-RUN npm ci --omit=dev
+# 使用 npm ci 如果有 package-lock.json，否则用 npm install
+RUN npm ci --omit=dev || npm install --omit=dev
 
 # 复制源代码
 COPY src ./src
