@@ -44,36 +44,134 @@ class TranslationService {
         'hi': 'Hindi'
       };
 
-      const prompt = `Translate the following ${sourceLang} texts to ${langNames[targetLang]}.
-Return only the translations, maintaining the same order and structure.
-If a text is empty or null, return it as is.
+      // Create input array with explicit indexing for validation
+      const inputTexts = texts.map((text, index) => ({
+        index: index,
+        original: text || '[EMPTY_INPUT]'
+      }));
 
-Texts to translate:
-${texts.map((t, i) => `${i + 1}. ${t || '[empty]'}`).join('\n')}`;
+      const prompt = `Translate the following ${sourceLang} texts to ${langNames[targetLang]}.
+
+CRITICAL REQUIREMENTS:
+1. You MUST return ONLY a valid JSON array
+2. NO additional text, headers, or explanations
+3. EXACTLY ${texts.length} translations in the same order
+4. Each array element must be a string
+5. If input is empty or "[EMPTY_INPUT]", return "[EMPTY]"
+
+INPUT TEXTS TO TRANSLATE:
+${inputTexts.map(item => `[${item.index}]: ${item.original}`).join('\n')}
+
+REQUIRED OUTPUT FORMAT:
+["translation1", "translation2", "translation3", ...]
+
+EXAMPLE:
+Input: ["你好", "世界", ""]
+Output: ["Hello", "World", "[EMPTY]"]`;
 
       const response = await this.openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
-            content: 'You are a professional translator. Translate accurately while maintaining the meaning and context.'
+            content: `You are a professional translator. Output ONLY valid JSON arrays. Never include explanations, headers, or any text outside the JSON array. You must return exactly ${texts.length} string elements in the array, preserving the exact input order.`
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.3,
+        temperature: 0.1, // Lower temperature for more deterministic output
         max_tokens: 2000
       });
 
-      const translatedText = response.choices[0].message.content;
-      // 解析返回的翻译
-      const translations = translatedText.split('\n')
-        .filter(line => line.trim())
-        .map(line => line.replace(/^\d+\.\s*/, '').replace('[empty]', ''));
+      const responseContent = response.choices[0].message.content.trim();
 
+      // Validate and parse JSON response
+      let translations;
+      try {
+        // Remove any potential wrapping text and extract JSON array
+        const jsonMatch = responseContent.match(/\[.*\]/s);
+        if (!jsonMatch) {
+          throw new Error('No JSON array found in response');
+        }
+
+        translations = JSON.parse(jsonMatch[0]);
+
+        // Validate it's an array
+        if (!Array.isArray(translations)) {
+          throw new Error('Response is not an array');
+        }
+
+        // Validate array length
+        if (translations.length !== texts.length) {
+          throw new Error(`Array length mismatch: expected ${texts.length}, got ${translations.length}`);
+        }
+
+        // Clean up translations and handle empty markers
+        translations = translations.map((translation, index) => {
+          if (typeof translation !== 'string') {
+            logger.warn(`Non-string translation at index ${index}, using original text`);
+            return texts[index] || '';
+          }
+
+          // Handle empty markers
+          if (translation === '[EMPTY]' || translation === '[EMPTY_INPUT]') {
+            return '';
+          }
+
+          return translation.trim();
+        });
+
+      } catch (parseError) {
+        logger.error(`JSON parsing error for ${targetLang}:`, parseError.message);
+        logger.error('Raw response:', responseContent);
+
+        // Fallback: try to extract translations using the old method
+        try {
+          const lines = responseContent.split('\n').filter(line => line.trim());
+          const fallbackTranslations = [];
+
+          for (let i = 0; i < texts.length; i++) {
+            // Look for lines that might be translations
+            let translation = texts[i] || ''; // Default to original
+
+            if (lines[i]) {
+              // Remove common prefixes and clean up
+              translation = lines[i]
+                .replace(/^\d+[\.\:\]\)\-\s]*/, '')
+                .replace(/^[\"\'\[\]]*/, '')
+                .replace(/[\"\'\[\]]*$/, '')
+                .replace(/\[EMPTY\]/g, '')
+                .replace(/\[EMPTY_INPUT\]/g, '')
+                .trim();
+            }
+
+            fallbackTranslations.push(translation || texts[i] || '');
+          }
+
+          return fallbackTranslations;
+        } catch (fallbackError) {
+          logger.error(`Fallback parsing also failed for ${targetLang}:`, fallbackError.message);
+          return texts; // Return original texts as last resort
+        }
+      }
+
+      // Final validation
+      if (translations.length !== texts.length) {
+        logger.warn(`Final translation count mismatch for ${targetLang}: expected ${texts.length}, got ${translations.length}`);
+
+        // Ensure we return exactly the right number of items
+        const adjustedTranslations = [];
+        for (let i = 0; i < texts.length; i++) {
+          adjustedTranslations.push(translations[i] || texts[i] || '');
+        }
+        return adjustedTranslations;
+      }
+
+      logger.info(`Successfully translated ${translations.length} texts to ${targetLang}`);
       return translations;
+
     } catch (error) {
       logger.error(`OpenAI translation error (${targetLang}):`, error.message);
       return texts; // 失败时返回原文
