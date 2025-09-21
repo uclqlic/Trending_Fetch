@@ -353,47 +353,64 @@ class TranslationService {
       original: text || '[EMPTY_INPUT]'
     }));
 
-    // Language-specific examples for JSON format validation
+    // More relevant examples for news headlines and event titles
     const examples = {
-      'en': { input: '["你好", "世界", ""]', output: '["Hello", "World", "[EMPTY]"]' },
-      'ja': { input: '["你好", "世界", ""]', output: '["こんにちは", "世界", "[EMPTY]"]' },
-      'ko': { input: '["你好", "世界", ""]', output: '["안녕하세요", "세계", "[EMPTY]"]' },
-      'es': { input: '["你好", "世界", ""]', output: '["Hola", "Mundo", "[EMPTY]"]' },
-      'fr': { input: '["你好", "世界", ""]', output: '["Bonjour", "Monde", "[EMPTY]"]' },
-      'de': { input: '["你好", "世界", ""]', output: '["Hallo", "Welt", "[EMPTY]"]' },
-      'ru': { input: '["你好", "世界", ""]', output: '["Привет", "Мир", "[EMPTY]"]' },
-      'ar': { input: '["你好", "世界", ""]', output: '["مرحبا", "العالم", "[EMPTY]"]' }
+      'en': {
+        input: '["2025衡水湖马拉松", "热搜榜", ""]',
+        output: '["2025 Hengshui Lake Marathon", "Hot Search Rankings", "[EMPTY]"]'
+      },
+      'ja': {
+        input: '["2025衡水湖马拉松", "热搜榜", ""]',
+        output: '["2025衡水湖マラソン", "トレンドランキング", "[EMPTY]"]'
+      },
+      'ko': {
+        input: '["2025衡水湖马拉松", "热搜榜", ""]',
+        output: '["2025 헝수이호 마라톤", "인기 검색 순위", "[EMPTY]"]'
+      },
+      'es': {
+        input: '["2025衡水湖马拉松", "热搜榜", ""]',
+        output: '["Maratón del Lago Hengshui 2025", "Rankings de Tendencias", "[EMPTY]"]'
+      },
+      'fr': {
+        input: '["2025衡水湖马拉松", "热搜榜", ""]',
+        output: '["Marathon du Lac Hengshui 2025", "Classements Tendances", "[EMPTY]"]'
+      },
+      'de': {
+        input: '["2025衡水湖马拉松", "热搜榜", ""]',
+        output: '["Hengshui-See-Marathon 2025", "Trend-Rankings", "[EMPTY]"]'
+      },
+      'ru': {
+        input: '["2025衡水湖马拉松", "热搜榜", ""]',
+        output: '["Марафон озера Хэншуй 2025", "Рейтинг трендов", "[EMPTY]"]'
+      },
+      'ar': {
+        input: '["2025衡水湖马拉松", "热搜榜", ""]',
+        output: '["ماراثون بحيرة هنغشوي 2025", "ترتيب الاتجاهات", "[EMPTY]"]'
+      }
     };
 
     const example = examples[targetLang] || examples['en'];
 
-    return `Translate the following ${sourceLang} texts to ${config.name} (${config.script} script).
+    return `TRANSLATE each ${sourceLang} text to natural, accurate ${config.name}.
 
-LANGUAGE-SPECIFIC REQUIREMENTS FOR ${config.name.toUpperCase()}:
-- Script: ${config.script}
-- Text direction: ${config.direction.toUpperCase()}
+TRANSLATION CONTEXT: These are Chinese news headlines, event titles, and trending topics. Translate them to convey the same meaning in ${config.name}.
+
+TRANSLATION REQUIREMENTS:
 - ${config.specialInstructions}
-
-CRITICAL JSON OUTPUT REQUIREMENTS:
-1. You MUST return ONLY a valid JSON array with UTF-8 encoding
-2. NO additional text, explanations, comments, or formatting outside the JSON
-3. EXACTLY ${texts.length} translations in the same order as input
-4. Each array element must be a properly escaped JSON string
-5. For empty inputs "[EMPTY_INPUT]", return "[EMPTY]"
-6. Preserve all special characters with proper JSON escaping
-7. Ensure compatibility with JSON.parse() for ${config.script} characters
+- Keep proper nouns (like place names) recognizable
+- Maintain the meaning and tone of the original text
+- Use natural ${config.name} expressions
 
 INPUT TEXTS TO TRANSLATE:
-${inputTexts.map(item => `[${item.index}]: ${item.original}`).join('\n')}
+${inputTexts.map(item => `${item.original}`).join('\n')}
 
-REQUIRED OUTPUT FORMAT (exactly like this structure):
-["translation1", "translation2", "translation3", ...]
+OUTPUT FORMAT: Return only a JSON array with the translations in the same order.
 
-EXAMPLE FOR ${config.name.toUpperCase()}:
-Input: ${example.input}
+EXAMPLE:
+Input texts: ${example.input.slice(1, -1).split('", "').join('\n')}
 Output: ${example.output}
 
-IMPORTANT: Your response must be valid JSON that can be parsed by JSON.parse() with proper ${config.script} character encoding.`;
+Your response must be valid JSON that can be parsed directly. Do not include any text before or after the JSON array.`;
   }
 
   /**
@@ -409,19 +426,17 @@ IMPORTANT: Your response must be valid JSON that can be parsed by JSON.parse() w
       const config = this.getLanguageConfig(targetLang);
       const prompt = this.createLanguageAwarePrompt(texts, targetLang, sourceLang);
 
-      // Language-specific system message
-      const systemMessage = `You are a professional translator specializing in ${config.name} (${config.script} script).
+      // Simplified, translation-focused system message
+      const systemMessage = `You are a professional translator. Your task is to translate Chinese text to ${config.name}.
 
-CRITICAL REQUIREMENTS:
-1. Output ONLY valid JSON arrays with proper UTF-8 encoding
-2. Never include explanations, headers, markdown, or any text outside the JSON array
-3. Return exactly ${texts.length} string elements in the array
-4. Preserve exact input order (index 0 → array[0], index 1 → array[1], etc.)
-5. Handle ${config.script} characters with proper JSON string escaping
-6. For ${config.direction} languages, ensure proper text direction in output
-7. Apply ${config.name} cultural and linguistic conventions
+RULES:
+1. Always translate the text - never return it unchanged
+2. Provide natural, accurate translations that preserve meaning
+3. Return only a valid JSON array with the translations
+4. Maintain the exact same order as the input texts
+5. Return exactly ${texts.length} translations
 
-Your output will be parsed by JSON.parse() - ensure it's valid JSON!`;
+Focus on creating high-quality translations, not just formatting.`;
 
       const response = await this.openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
