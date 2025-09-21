@@ -22,7 +22,382 @@ class TranslationService {
   }
 
   /**
-   * 使用OpenAI翻译文本
+   * 获取语言特定的配置
+   */
+  getLanguageConfig(targetLang) {
+    const configs = {
+      'en': {
+        name: 'English',
+        script: 'Latin',
+        direction: 'ltr',
+        temperature: 0.1,
+        maxTokens: 2000,
+        specialInstructions: 'Use natural, idiomatic English expressions.'
+      },
+      'ja': {
+        name: 'Japanese',
+        script: 'Mixed (Hiragana, Katakana, Kanji)',
+        direction: 'ltr',
+        temperature: 0.15,
+        maxTokens: 2500,
+        specialInstructions: 'Use appropriate levels of politeness (keigo). Mix hiragana, katakana, and kanji naturally. Maintain Japanese sentence structure.'
+      },
+      'ko': {
+        name: 'Korean',
+        script: 'Hangul',
+        direction: 'ltr',
+        temperature: 0.15,
+        maxTokens: 2500,
+        specialInstructions: 'Use appropriate honorific levels. Maintain Korean sentence structure (SOV). Use Hangul characters properly.'
+      },
+      'es': {
+        name: 'Spanish',
+        script: 'Latin',
+        direction: 'ltr',
+        temperature: 0.1,
+        maxTokens: 2000,
+        specialInstructions: 'Use neutral Spanish suitable for international audiences. Maintain proper gender agreement.'
+      },
+      'fr': {
+        name: 'French',
+        script: 'Latin',
+        direction: 'ltr',
+        temperature: 0.1,
+        maxTokens: 2000,
+        specialInstructions: 'Use standard French. Maintain proper gender agreement and formal/informal register as appropriate.'
+      },
+      'de': {
+        name: 'German',
+        script: 'Latin',
+        direction: 'ltr',
+        temperature: 0.1,
+        maxTokens: 2200,
+        specialInstructions: 'Use standard German. Apply proper capitalization rules for nouns. Maintain compound word structure when appropriate.'
+      },
+      'ru': {
+        name: 'Russian',
+        script: 'Cyrillic',
+        direction: 'ltr',
+        temperature: 0.15,
+        maxTokens: 2200,
+        specialInstructions: 'Use proper Cyrillic script. Maintain Russian grammatical cases and word order. Ensure proper encoding of special characters.'
+      },
+      'ar': {
+        name: 'Arabic',
+        script: 'Arabic',
+        direction: 'rtl',
+        temperature: 0.2,
+        maxTokens: 2500,
+        specialInstructions: 'Use Modern Standard Arabic (MSA). Maintain right-to-left text direction. Use proper Arabic script connection rules. Ensure proper encoding of Arabic diacritics if needed.'
+      }
+    };
+
+    return configs[targetLang] || configs['en'];
+  }
+
+  /**
+   * 增强的JSON响应解析，支持所有字符集
+   */
+  parseTranslationResponse(responseContent, originalTexts, targetLang, config) {
+    // Step 1: Clean response content and handle different character encodings
+    let cleanContent = responseContent;
+
+    // Remove potential markdown formatting that might interfere
+    cleanContent = cleanContent.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
+    cleanContent = cleanContent.replace(/^```\s*/, '').replace(/\s*```$/i, '');
+
+    // Step 2: Extract JSON array with improved regex for all character sets
+    // This regex handles Unicode characters properly including RTL and CJK
+    const jsonMatch = cleanContent.match(/\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]/s);
+    if (!jsonMatch) {
+      throw new Error(`No JSON array found in response for ${config.name}`);
+    }
+
+    let jsonString = jsonMatch[0];
+
+    // Step 3: Validate JSON structure before parsing
+    // Check for proper Unicode escaping and character encoding
+    try {
+      // Pre-validate: ensure the string can handle the target character set
+      if (config.script === 'Arabic') {
+        // Validate Arabic text direction and character encoding
+        this.validateArabicJSON(jsonString);
+      } else if (config.script.includes('Hiragana') || config.script.includes('Kanji')) {
+        // Validate CJK character encoding
+        this.validateCJKJSON(jsonString);
+      } else if (config.script === 'Cyrillic') {
+        // Validate Cyrillic character encoding
+        this.validateCyrillicJSON(jsonString);
+      }
+
+      // Parse JSON with proper error handling for character encoding issues
+      const translations = JSON.parse(jsonString);
+
+      // Step 4: Validate structure and content
+      if (!Array.isArray(translations)) {
+        throw new Error(`Response is not an array for ${config.name}`);
+      }
+
+      if (translations.length !== originalTexts.length) {
+        throw new Error(`Array length mismatch for ${config.name}: expected ${originalTexts.length}, got ${translations.length}`);
+      }
+
+      // Step 5: Process and validate each translation
+      const processedTranslations = translations.map((translation, index) => {
+        if (typeof translation !== 'string') {
+          logger.warn(`Non-string translation at index ${index} for ${config.name}, using original text`);
+          return originalTexts[index] || '';
+        }
+
+        // Handle empty markers
+        if (translation === '[EMPTY]' || translation === '[EMPTY_INPUT]') {
+          return '';
+        }
+
+        // Language-specific post-processing
+        return this.postProcessTranslation(translation, targetLang, config);
+      });
+
+      return processedTranslations;
+
+    } catch (jsonError) {
+      throw new Error(`JSON parsing failed for ${config.name}: ${jsonError.message}`);
+    }
+  }
+
+  /**
+   * 语言特定的JSON验证方法
+   */
+  validateArabicJSON(jsonString) {
+    // Check for proper Arabic character encoding and RTL markers
+    const arabicPattern = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+    const hasArabic = arabicPattern.test(jsonString);
+
+    if (hasArabic) {
+      // Ensure proper Unicode escaping for Arabic characters
+      const invalidEscapes = /\\u[0-9a-fA-F]{0,3}[^0-9a-fA-F]/g;
+      if (invalidEscapes.test(jsonString)) {
+        throw new Error('Invalid Unicode escaping detected in Arabic text');
+      }
+    }
+  }
+
+  validateCJKJSON(jsonString) {
+    // Check for proper CJK character encoding
+    const cjkPattern = /[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/;
+    const hasCJK = cjkPattern.test(jsonString);
+
+    if (hasCJK) {
+      // Ensure proper Unicode escaping for CJK characters
+      const invalidEscapes = /\\u[0-9a-fA-F]{0,3}[^0-9a-fA-F]/g;
+      if (invalidEscapes.test(jsonString)) {
+        throw new Error('Invalid Unicode escaping detected in CJK text');
+      }
+    }
+  }
+
+  validateCyrillicJSON(jsonString) {
+    // Check for proper Cyrillic character encoding
+    const cyrillicPattern = /[\u0400-\u04FF\u0500-\u052F]/;
+    const hasCyrillic = cyrillicPattern.test(jsonString);
+
+    if (hasCyrillic) {
+      // Ensure proper Unicode escaping for Cyrillic characters
+      const invalidEscapes = /\\u[0-9a-fA-F]{0,3}[^0-9a-fA-F]/g;
+      if (invalidEscapes.test(jsonString)) {
+        throw new Error('Invalid Unicode escaping detected in Cyrillic text');
+      }
+    }
+  }
+
+  /**
+   * 语言特定的翻译后处理
+   */
+  postProcessTranslation(translation, targetLang, config) {
+    let processed = translation.trim();
+
+    // Language-specific post-processing
+    switch (targetLang) {
+      case 'ar':
+        // For Arabic: ensure proper RTL formatting and remove any LTR markers
+        processed = processed.replace(/\u200E/g, ''); // Remove LTR marks
+        processed = processed.replace(/\u200F/g, ''); // Remove RTL marks (will be added by display layer)
+        break;
+
+      case 'ja':
+        // For Japanese: ensure proper character mix and spacing
+        processed = processed.replace(/\s+/g, ''); // Remove extra spaces in Japanese
+        break;
+
+      case 'ko':
+        // For Korean: ensure proper Hangul spacing
+        processed = processed.replace(/\s+/g, ' ').trim(); // Normalize spacing
+        break;
+
+      case 'ru':
+        // For Russian: ensure proper Cyrillic character normalization
+        processed = processed.normalize('NFC'); // Normalize Cyrillic characters
+        break;
+
+      default:
+        // For Latin-based languages: standard processing
+        processed = processed.replace(/\s+/g, ' ').trim();
+    }
+
+    return processed;
+  }
+
+  /**
+   * 增强的回退解析，支持多语言
+   */
+  parseTranslationFallback(responseContent, originalTexts, targetLang, config) {
+    logger.info(`Attempting fallback parsing for ${config.name}`);
+
+    // Try different fallback strategies based on language
+    const strategies = [
+      () => this.fallbackParseByLines(responseContent, originalTexts, config),
+      () => this.fallbackParseByQuotes(responseContent, originalTexts, config),
+      () => this.fallbackParseByNumbers(responseContent, originalTexts, config)
+    ];
+
+    for (const strategy of strategies) {
+      try {
+        const result = strategy();
+        if (result && result.length === originalTexts.length) {
+          logger.info(`Fallback strategy succeeded for ${config.name}`);
+          return result;
+        }
+      } catch (strategyError) {
+        logger.debug(`Fallback strategy failed for ${config.name}:`, strategyError.message);
+        continue;
+      }
+    }
+
+    throw new Error(`All fallback strategies failed for ${config.name}`);
+  }
+
+  fallbackParseByLines(responseContent, originalTexts, config) {
+    const lines = responseContent.split('\n').filter(line => line.trim());
+    const translations = [];
+
+    for (let i = 0; i < originalTexts.length; i++) {
+      let translation = originalTexts[i] || ''; // Default to original
+
+      if (lines[i]) {
+        // Remove common prefixes and clean up based on language
+        translation = lines[i]
+          .replace(/^\d+[\.\:\]\)\-\s]*/, '') // Remove numbering
+          .replace(/^[\"\'\[\]]*/, '') // Remove quote marks
+          .replace(/[\"\'\[\]]*$/, '') // Remove ending quotes
+          .replace(/\[EMPTY\]/g, '') // Remove empty markers
+          .replace(/\[EMPTY_INPUT\]/g, '')
+          .trim();
+
+        // Language-specific cleaning
+        translation = this.postProcessTranslation(translation, config.targetLang, config);
+      }
+
+      translations.push(translation || originalTexts[i] || '');
+    }
+
+    return translations;
+  }
+
+  fallbackParseByQuotes(responseContent, originalTexts, config) {
+    // Extract quoted strings that might contain translations
+    const quotedPattern = /"([^"\\]*(\\.[^"\\]*)*)"/g;
+    const matches = [];
+    let match;
+
+    while ((match = quotedPattern.exec(responseContent)) !== null) {
+      matches.push(match[1]);
+    }
+
+    if (matches.length === originalTexts.length) {
+      return matches.map((translation, index) => {
+        const processed = this.postProcessTranslation(translation, config.targetLang, config);
+        return processed === '[EMPTY]' ? '' : processed;
+      });
+    }
+
+    throw new Error('Quote-based parsing did not yield correct number of translations');
+  }
+
+  fallbackParseByNumbers(responseContent, originalTexts, config) {
+    // Look for numbered list format: 1. Translation, 2. Translation, etc.
+    const numberedPattern = /\d+\.\s*(.+)/g;
+    const matches = [];
+    let match;
+
+    while ((match = numberedPattern.exec(responseContent)) !== null) {
+      matches.push(match[1].trim());
+    }
+
+    if (matches.length === originalTexts.length) {
+      return matches.map((translation, index) => {
+        const processed = this.postProcessTranslation(translation, config.targetLang, config);
+        return processed === '[EMPTY]' ? '' : processed;
+      });
+    }
+
+    throw new Error('Number-based parsing did not yield correct number of translations');
+  }
+
+  /**
+   * 创建语言感知的翻译提示
+   */
+  createLanguageAwarePrompt(texts, targetLang, sourceLang = 'Chinese') {
+    const config = this.getLanguageConfig(targetLang);
+    const inputTexts = texts.map((text, index) => ({
+      index: index,
+      original: text || '[EMPTY_INPUT]'
+    }));
+
+    // Language-specific examples for JSON format validation
+    const examples = {
+      'en': { input: '["你好", "世界", ""]', output: '["Hello", "World", "[EMPTY]"]' },
+      'ja': { input: '["你好", "世界", ""]', output: '["こんにちは", "世界", "[EMPTY]"]' },
+      'ko': { input: '["你好", "世界", ""]', output: '["안녕하세요", "세계", "[EMPTY]"]' },
+      'es': { input: '["你好", "世界", ""]', output: '["Hola", "Mundo", "[EMPTY]"]' },
+      'fr': { input: '["你好", "世界", ""]', output: '["Bonjour", "Monde", "[EMPTY]"]' },
+      'de': { input: '["你好", "世界", ""]', output: '["Hallo", "Welt", "[EMPTY]"]' },
+      'ru': { input: '["你好", "世界", ""]', output: '["Привет", "Мир", "[EMPTY]"]' },
+      'ar': { input: '["你好", "世界", ""]', output: '["مرحبا", "العالم", "[EMPTY]"]' }
+    };
+
+    const example = examples[targetLang] || examples['en'];
+
+    return `Translate the following ${sourceLang} texts to ${config.name} (${config.script} script).
+
+LANGUAGE-SPECIFIC REQUIREMENTS FOR ${config.name.toUpperCase()}:
+- Script: ${config.script}
+- Text direction: ${config.direction.toUpperCase()}
+- ${config.specialInstructions}
+
+CRITICAL JSON OUTPUT REQUIREMENTS:
+1. You MUST return ONLY a valid JSON array with UTF-8 encoding
+2. NO additional text, explanations, comments, or formatting outside the JSON
+3. EXACTLY ${texts.length} translations in the same order as input
+4. Each array element must be a properly escaped JSON string
+5. For empty inputs "[EMPTY_INPUT]", return "[EMPTY]"
+6. Preserve all special characters with proper JSON escaping
+7. Ensure compatibility with JSON.parse() for ${config.script} characters
+
+INPUT TEXTS TO TRANSLATE:
+${inputTexts.map(item => `[${item.index}]: ${item.original}`).join('\n')}
+
+REQUIRED OUTPUT FORMAT (exactly like this structure):
+["translation1", "translation2", "translation3", ...]
+
+EXAMPLE FOR ${config.name.toUpperCase()}:
+Input: ${example.input}
+Output: ${example.output}
+
+IMPORTANT: Your response must be valid JSON that can be parsed by JSON.parse() with proper ${config.script} character encoding.`;
+  }
+
+  /**
+   * 使用OpenAI翻译文本 - 增强的多语言版本
    */
   async translateWithOpenAI(texts, targetLang, sourceLang = 'Chinese') {
     if (!this.openai) {
@@ -31,126 +406,55 @@ class TranslationService {
     }
 
     try {
-      const langNames = {
-        'en': 'English',
-        'ja': 'Japanese',
-        'ko': 'Korean',
-        'es': 'Spanish',
-        'fr': 'French',
-        'de': 'German',
-        'ru': 'Russian',
-        'ar': 'Arabic',
-        'pt': 'Portuguese',
-        'hi': 'Hindi'
-      };
+      const config = this.getLanguageConfig(targetLang);
+      const prompt = this.createLanguageAwarePrompt(texts, targetLang, sourceLang);
 
-      // Create input array with explicit indexing for validation
-      const inputTexts = texts.map((text, index) => ({
-        index: index,
-        original: text || '[EMPTY_INPUT]'
-      }));
-
-      const prompt = `Translate the following ${sourceLang} texts to ${langNames[targetLang]}.
+      // Language-specific system message
+      const systemMessage = `You are a professional translator specializing in ${config.name} (${config.script} script).
 
 CRITICAL REQUIREMENTS:
-1. You MUST return ONLY a valid JSON array
-2. NO additional text, headers, or explanations
-3. EXACTLY ${texts.length} translations in the same order
-4. Each array element must be a string
-5. If input is empty or "[EMPTY_INPUT]", return "[EMPTY]"
+1. Output ONLY valid JSON arrays with proper UTF-8 encoding
+2. Never include explanations, headers, markdown, or any text outside the JSON array
+3. Return exactly ${texts.length} string elements in the array
+4. Preserve exact input order (index 0 → array[0], index 1 → array[1], etc.)
+5. Handle ${config.script} characters with proper JSON string escaping
+6. For ${config.direction} languages, ensure proper text direction in output
+7. Apply ${config.name} cultural and linguistic conventions
 
-INPUT TEXTS TO TRANSLATE:
-${inputTexts.map(item => `[${item.index}]: ${item.original}`).join('\n')}
-
-REQUIRED OUTPUT FORMAT:
-["translation1", "translation2", "translation3", ...]
-
-EXAMPLE:
-Input: ["你好", "世界", ""]
-Output: ["Hello", "World", "[EMPTY]"]`;
+Your output will be parsed by JSON.parse() - ensure it's valid JSON!`;
 
       const response = await this.openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
-            content: `You are a professional translator. Output ONLY valid JSON arrays. Never include explanations, headers, or any text outside the JSON array. You must return exactly ${texts.length} string elements in the array, preserving the exact input order.`
+            content: systemMessage
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.1, // Lower temperature for more deterministic output
-        max_tokens: 2000
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+        // Ensure UTF-8 encoding for all character sets
+        encoding: 'utf-8'
       });
 
       const responseContent = response.choices[0].message.content.trim();
 
-      // Validate and parse JSON response
+      // Enhanced JSON validation for all character sets
       let translations;
       try {
-        // Remove any potential wrapping text and extract JSON array
-        const jsonMatch = responseContent.match(/\[.*\]/s);
-        if (!jsonMatch) {
-          throw new Error('No JSON array found in response');
-        }
-
-        translations = JSON.parse(jsonMatch[0]);
-
-        // Validate it's an array
-        if (!Array.isArray(translations)) {
-          throw new Error('Response is not an array');
-        }
-
-        // Validate array length
-        if (translations.length !== texts.length) {
-          throw new Error(`Array length mismatch: expected ${texts.length}, got ${translations.length}`);
-        }
-
-        // Clean up translations and handle empty markers
-        translations = translations.map((translation, index) => {
-          if (typeof translation !== 'string') {
-            logger.warn(`Non-string translation at index ${index}, using original text`);
-            return texts[index] || '';
-          }
-
-          // Handle empty markers
-          if (translation === '[EMPTY]' || translation === '[EMPTY_INPUT]') {
-            return '';
-          }
-
-          return translation.trim();
-        });
+        translations = this.parseTranslationResponse(responseContent, texts, targetLang, config);
 
       } catch (parseError) {
         logger.error(`JSON parsing error for ${targetLang}:`, parseError.message);
         logger.error('Raw response:', responseContent);
 
-        // Fallback: try to extract translations using the old method
+        // Enhanced fallback with language-aware parsing
         try {
-          const lines = responseContent.split('\n').filter(line => line.trim());
-          const fallbackTranslations = [];
-
-          for (let i = 0; i < texts.length; i++) {
-            // Look for lines that might be translations
-            let translation = texts[i] || ''; // Default to original
-
-            if (lines[i]) {
-              // Remove common prefixes and clean up
-              translation = lines[i]
-                .replace(/^\d+[\.\:\]\)\-\s]*/, '')
-                .replace(/^[\"\'\[\]]*/, '')
-                .replace(/[\"\'\[\]]*$/, '')
-                .replace(/\[EMPTY\]/g, '')
-                .replace(/\[EMPTY_INPUT\]/g, '')
-                .trim();
-            }
-
-            fallbackTranslations.push(translation || texts[i] || '');
-          }
-
-          return fallbackTranslations;
+          translations = this.parseTranslationFallback(responseContent, texts, targetLang, config);
         } catch (fallbackError) {
           logger.error(`Fallback parsing also failed for ${targetLang}:`, fallbackError.message);
           return texts; // Return original texts as last resort
