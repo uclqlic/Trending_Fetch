@@ -451,9 +451,7 @@ Focus on creating high-quality translations, not just formatting.`;
           }
         ],
         temperature: config.temperature,
-        max_tokens: config.maxTokens,
-        // Ensure UTF-8 encoding for all character sets
-        encoding: 'utf-8'
+        max_tokens: config.maxTokens
       });
 
       const responseContent = response.choices[0].message.content.trim();
